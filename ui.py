@@ -3,14 +3,21 @@ import cv2
 import numpy as np
 from PIL import Image
 import joblib
+from kernels import (
+    SHARPEN,
+    SOBEL_Y,
+    apply_kernel
+)
 
 def load_model(model_path):
     return joblib.load(model_path)
 
 def preprocess_image(image, target_size=(32, 32)):
-    image = image.convert('RGB')
+    image = image.convert('L')
     image = np.array(image)
     image = cv2.resize(image, target_size)
+    image = apply_kernel(image, SHARPEN)
+    image = apply_kernel(image, SOBEL_Y)
     image = image.flatten().reshape(1, -1)
     return image
 
@@ -28,7 +35,7 @@ if uploaded_file is not None:
     st.image(image, caption='Uploaded Image', use_container_width=True)
     st.write("Processing...")
 
-    model = load_model("svc.pkl")
+    model = load_model("model.pkl")
     processed_image = preprocess_image(image)
     result = predict_image(model, processed_image)
 
