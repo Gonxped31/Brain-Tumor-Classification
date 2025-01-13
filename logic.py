@@ -16,7 +16,7 @@ from kernels import (
 import itertools
 from sklearn.svm import SVC
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import StratifiedKFold
 from sklearn.svm import SVC
 
 def convert_images_to_png(path):
@@ -69,7 +69,7 @@ def train_and_evaluate(train_images, train_labels, test_images, test_labels):
     return accuracy, precision, recall, f1, model
 
 
-def best_filter_search(yes_images_path, no_images_path):
+def best_filter_search(yes_images_path, no_images_path, n_splits=5):
     kernels = {
         'Sharpen': lambda img: apply_kernel(img, SHARPEN),
         'Gaussian Blur': lambda img: cv2.GaussianBlur(img, (5, 5), 0),
@@ -80,46 +80,41 @@ def best_filter_search(yes_images_path, no_images_path):
         'Laplacian': lambda img: apply_kernel(img, LAPLACIAN)
     }
 
-    best_metrics = {
-        'accuracy': 0,
-        'precision': 0,
-        'recall': 0,
-        'f1': 0
-    }
-
+    best_metrics = {'accuracy': 0, 'precision': 0, 'recall': 0, 'f1': 0}
     best_combo = None
-
     best_model = None
+
+    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
 
     for _, r in enumerate(tqdm(range(1, len(kernels) + 1), desc="Applying kernels")):
         for combo in itertools.combinations(kernels.values(), r):
             yes_images = get_images(yes_images_path, combo)
             no_images = get_images(no_images_path, combo)
             labels = np.array([1]*len(yes_images) + [0]*len(no_images))
-            train_images = np.array(yes_images + no_images).astype('float32')
+            images = np.array(yes_images + no_images).astype('float32')
 
-            train_sample, test_sample, train_label, test_label = train_test_split(train_images, labels, test_size=0.2, random_state=0)
+            metrics = {'accuracy': [], 'precision': [], 'recall': [], 'f1': []}
 
-            accuracy, precision, recall, f1, model = train_and_evaluate(train_sample, train_label, test_sample, test_label)
-            if best_combo != None or best_model != None:
-                diff = int((accuracy > best_metrics['accuracy'])) + int((precision > best_metrics['precision'])) +\
-                    int((recall > best_metrics['recall'])) + int((f1 > best_metrics['f1']))
-            else:
-                diff = 4
+            for train_idx, test_idx in skf.split(images, labels):
+                train_sample, test_sample = images[train_idx], images[test_idx]
+                train_label, test_label = labels[train_idx], labels[test_idx]
+
+                accuracy, precision, recall, f1, model = train_and_evaluate(train_sample, train_label, test_sample, test_label)
+
+                metrics['accuracy'].append(accuracy)
+                metrics['precision'].append(precision)
+                metrics['recall'].append(recall)
+                metrics['f1'].append(f1)
+
+            avg_metrics = {key: np.mean(val) for key, val in metrics.items()}
+
+            diff = sum(avg_metrics[key] > best_metrics[key] for key in best_metrics)
 
             if diff >= 3:
-                best_metrics = {
-                    'accuracy': accuracy,
-                    'precision': precision,
-                    'recall': recall,
-                    'f1': f1
-                }
-
+                best_metrics = avg_metrics
                 best_combo = combo
-                
                 best_model = model
 
     best_combo_list = [name for name, func in kernels.items() if func in best_combo]
 
-    return best_metrics, best_combo_list, model
-            
+    return best_metrics, best_combo_list, best_model
